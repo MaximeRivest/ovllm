@@ -84,7 +84,7 @@ __all__ = [
     "VLLMChatLM",
     "AutoBatchLM",
 ]
-__version__ = "0.2.0" 
+__version__ = "0.3.0" 
 
 # A small, capable default model that can run on most systems.
 _DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
@@ -444,44 +444,98 @@ class _LLMProxy(dspy.BaseLM):
 
 llm = _LLMProxy(default_model=_DEFAULT_MODEL)
 
+import subprocess
+import re
+
 def get_gpu_memory() -> tuple[float, int]:
-    """Returns the total GPU memory in GB and the number of available GPUs."""
-    if not torch.cuda.is_available():
+    """
+    Attempt to detect the total GPU memory (in GB) and the number of GPUs.
+
+    Returns
+    -------
+    tuple
+        A tuple ``(vram_gb, gpu_count)`` describing the total available VRAM
+        across all GPUs in the system.  If no GPU is detected, returns
+        (0.0, 0).
+    """
+    try:
+        # Try to query NVIDIA GPUs via nvidia-smi
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,nounits,noheader"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        # Parse the output (one line per GPU)
+        mems = [float(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+        if not mems:
+            return 0.0, 0
+        return sum(mems) / 1024.0, len(mems)  # convert MiB to GiB
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        # If nvidia-smi is not available, try to detect via other tools
         return 0.0, 0
-    
-    device_count = torch.cuda.device_count()
-    # For simplicity, we report the memory of the first device.
-    total_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024 ** 3)
-    return total_memory_gb, device_count
 
 
-def suggest_models():
-    """Prints a list of suggested models tailored to your available GPU memory."""
+def suggest_models() -> None:
+    """
+    Print a list of suggested Hugging Face models tailored to the available
+    GPU memory on the current system.
+
+    The recommendations are organised into VRAM tiers.  For each tier we list
+    instruction‑tuned or chat‑optimised checkpoints that fit comfortably in
+    the given memory budget.  These suggestions are based on publicly
+    available documentation: small models like Qwen3‐0.6B (≈0.6 B parameters)
+    and Gemma 3 1B require only around a gigabyte of GPU memory【981739344745879†L89-L98】【154918926046664†L68-L120】,
+    while larger mixtures‑of‑experts and 24–30 B parameter models can
+    saturate a 32 GB card【554109789521618†L64-L73】【37215507856503†L692-L721】.
+    """
     vram, gpu_count = get_gpu_memory()
-    print(f"Detected {vram:.1f} GB of VRAM across {gpu_count} GPU(s).\n")
-    
-    if vram == 0:
+    print(f"Detected {vram:.1f} GB of VRAM across {gpu_count} GPU(s).\n")
+
+    if vram == 0.0:
         print("No compatible GPU detected. vLLM performance may be limited.")
         return
 
     print("Suggested models for your system:")
+    # sub‑4 GB VRAM: tiny instruction‑tuned models
     if vram < 4:
-        print("  - Qwen/Qwen2-0.5B-Instruct (~1 GB VRAM)")
+        # Qwen3‑0.6B has 0.6 billion parameters【981739344745879†L89-L98】.
+        print("  - Qwen/Qwen3-0.6B-Instruct (≈0.6 B params, ~1 GB VRAM)")
+        # Gemma 3 1B is the smallest member of the Gemma 3 family【154918926046664†L68-L120】.
+        print("  - google/gemma-3-1b-it (1 B params, ~2 GB VRAM)")
+    # 4–7 GB VRAM: small to medium models
     elif vram < 8:
-        print("  - Qwen/Qwen2-0.5B-Instruct (~1 GB VRAM)")
-        print("  - google/gemma-2b-it (~5 GB VRAM)")
+        print("  - Qwen/Qwen3-0.6B-Instruct (≈0.6 B params, ~1 GB VRAM)")
+        # Qwen3‑4B has around 4 billion parameters【563728763966739†L92-L100】.
+        print("  - Qwen/Qwen3-4B-Instruct (4 B params, ~6 GB VRAM)")
+        # Gemma 3 4B is a 4 billion parameter model in the Gemma 3 lineup【154918926046664†L68-L120】.
+        print("  - google/gemma-3-4b-it (4 B params, ~6 GB VRAM)")
+    # 8–15 GB VRAM: medium‑sized chat models
     elif vram < 16:
-        print("  - google/gemma-2b-it (~5 GB VRAM)")
-        print("  - Qwen/Qwen2-1.5B-Instruct (~3 GB VRAM)")
-        print("  - meta-llama/Llama-3-8B-Instruct-GGUF (~8-10 GB VRAM, format dependent)")
+        # Gemma 3 12B is a mid‑sized 12 billion parameter model【154918926046664†L68-L120】.
+        print("  - google/gemma-3-12b-it (12 B params, ~12 GB VRAM)")
+        # Meta Llama 3 8B is an 8 billion parameter model; GGUF quantised versions fit in ~10 GB.
+        print("  - meta-llama/Llama-3-8B-Instruct (8 B params, ~10 GB VRAM)")
+        # Mistral 7B Instruct is a 7 billion parameter chat model.
+        print("  - mistralai/Mistral-7B-Instruct-v0.2 (7 B params, ~12 GB VRAM)")
+    # 16–31 GB VRAM: large single‑GPU models
     elif vram < 32:
-        print("  - meta-llama/Llama-3-8B-Instruct (~16 GB VRAM)")
-        print("  - mistralai/Mistral-7B-Instruct-v0.2 (~15 GB VRAM)")
-        print("  - Qwen/Qwen2-7B-Instruct (~15 GB VRAM)")
+        # Mistral Small 3.1 has 24 billion parameters and fits on a 32 GB card【554109789521618†L64-L73】.
+        print("  - mistralai/Mistral-Small-3.1-24B-Instruct-2503 (24 B params, fits in 32 GB VRAM)")
+        # Qwen3‑30B‑A3B is a 30 billion parameter mixture‑of‑experts model that fits in 30 GB【37215507856503†L692-L721】.
+        print("  - Qwen/Qwen3-30B-A3B-Instruct-2507 (30 B params, fits in 30 GB VRAM)")
+        # Gemma 3 27B is the largest Gemma 3 variant【154918926046664†L68-L120】.
+        print("  - google/gemma-3-27b-it (27 B params, ~28–32 GB VRAM)")
+    # ≥32 GB VRAM: ultra‑large and Mixture‑of‑Experts models
     else:
-        print("  - meta-llama/Llama-3-8B-Instruct (~16 GB VRAM)")
-        print("  - Qwen/Qwen2-7B-Instruct (~15 GB VRAM)")
-        print("  - Your system may be able to run models up to 70B parameters.")
+        # Kimi K2 is a mixture‑of‑experts model with 32 billion active parameters【991836247192872†L94-L124】.
+        print("  - moonshotai/Kimi-K2-Instruct (1 T total / 32 B active params)")
+        # GLM‑4.5‑Air has 12 billion active parameters【564556693604147†L60-L69】.
+        print("  - zai-org/GLM-4.5-Air (12 B active params)")
+        # GLM‑4.5 has 32 billion active parameters【564556693604147†L60-L69】.
+        print("  - zai-org/GLM-4.5 (32 B active params)")
+        print("  - With ≥32 GB VRAM you may also explore experimental models up to 70 B parameters.")
+
 
 def help_ovllm():
     """Prints the main library documentation."""
