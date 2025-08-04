@@ -40,8 +40,6 @@ jobs:
     environment:
       name: pypi
       url: https://pypi.org/p/ovllm
-    permissions:
-      id-token: write  # IMPORTANT: this permission is mandatory for trusted publishing
     
     steps:
     - name: Download artifacts
@@ -53,8 +51,7 @@ jobs:
     - name: Publish to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
-        # Use trusted publishing (no password needed)
-        # See: https://docs.pypi.org/trusted-publishers/
+        password: ${{ secrets.PYPI_API_TOKEN }}
         verbose: true
 
   test-publish:
