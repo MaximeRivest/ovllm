@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ovllm"
-version = "0.1.2"
+version = "0.2.0"
 description = "One-line vLLM wrapper with gorgeous DSPy integration"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -27,10 +27,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "vllm>=0.9.0",
+    "vllm>=0.10.0",
     "torch>=2.0.0",
     "transformers>=4.30.0",
-    "dspy-ai>=2.5.0",
+    "dspy>=3.0.0b3",
 ]
 
 [project.optional-dependencies]

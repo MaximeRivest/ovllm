@@ -1,21 +1,30 @@
-# OVLLM 🚀
+# OvLLM 🚀
+
+> This is the very first 'working' version. Expect things to change and improve a lot. Still, what is documented here works on my machine.
 
 **One-line vLLM for everyone**
 
-OVLLM is a Python library that makes running local LLMs as easy as `llm("hello")` while leveraging the incredible performance of [vLLM](https://github.com/vllm-project/vllm). It's designed for simplicity without sacrificing power, featuring seamless [DSPy](https://github.com/stanfordnlp/dspy) integration and automatic request batching for maximum GPU efficiency.
+OvLLM is a Python library that makes running local LLMs as easy as a function call, while leveraging the incredible performance of [vLLM](https://github.com/vllm-project/vllm). It's designed for simplicity without sacrificing power, featuring native [DSPy](https://github.com/stanfordnlp/dspy) integration with proper output formatting and automatic request batching for maximum GPU efficiency.
+
+At its core, `ovllm` ensures you can get started instantly and build complex pipelines without worrying about the underlying engine's state management, memory, or batching logic.
+
+-----
 
 ## ✨ Features
 
-- **Zero-config startup**: Works out of the box with a sensible default model
-- **One-line model switching**: `llmtogpu("any-huggingface-model")` 
-- **Automatic batching**: Transparently groups requests for optimal GPU utilization
-- **DSPy native**: First-class support for DSPy pipelines
-- **Smart memory management**: Automatically cleans up when switching models
-- **Helpful errors**: Clear messages when models are too large for your GPU
-- **Rich documentation**: Comprehensive help via `help(ovllm)`
+  - **Zero-Config Startup**: Works out of the box with a sensible default model that runs on most systems.
+  - **One-Line Model Swapping**: Hot-swap models on the GPU with a single command: `llmtogpu("any-huggingface-model")`.
+  - **Automatic Request Batching**: Transparently groups concurrent requests for optimal GPU throughput.
+  - **Native DSPy Compatibility**: The `llm` object is a first-class `dspy.LM`, ready for any DSPy module or optimizer.
+  - **Smart Memory Management**: Automatically unloads old models and clears GPU memory when you switch.
+  - **Helpful Errors & Helpers**: Get clear, actionable error messages and use helpers like `suggest_models()` to find the right model for your hardware.
+  - **Rich Documentation**: Comprehensive help is built-in via Python's `help()` function.
 
+-----
 
 ## 📦 Installation
+
+**Prerequisite**: OVLLM uses vLLM, which requires an NVIDIA GPU with CUDA 12.1 or newer. Please ensure your environment is set up correctly.
 
 ### From PyPI (Recommended)
 
@@ -31,192 +40,167 @@ cd ovllm
 pip install -e .
 ```
 
-### Development Installation
-
-```bash
-git clone https://github.com/maximerivest/ovllm
-cd ovllm
-pip install -e ".[dev]"
-```
+-----
 
 ## 🎯 Quick Start
 
 ### Basic Usage
 
-```python
-from ovllm import llm
+Just import the `llm` object and call it. The first time you do, a small, capable default model will be downloaded and loaded into your GPU.
 
-# Just works - uses default model (Qwen/Qwen2.5-0.5B-Instruct)
-response = llm("What is the capital of France?")
-print(response)  # "The capital of France is Paris."
+```python
+import ovllm
+# The first call loads the default model (Qwen/Qwen3-0.6B). Please wait a moment.
+response = ovllm.llm("What is the capital of Canada?")
+
 ```
+
+> **Note:** For full DSPy compatibility, `llm()` returns a list containing a completion object. That's why we access `response[0]` to get the first result.
 
 ### Switching Models
 
+Easily switch to any model on the Hugging Face Hub. `ovllm` handles the cleanup automatically.
+
 ```python
-from ovllm import llmtogpu, suggest_models
+from ovllm import llmtogpu, suggest_models, llm
 
 # See what models your GPU can handle
-suggest_models()
+suggest_models() # good suggestions to come! wip :)
 
-# Load a different model (automatic cleanup of previous model)
-llmtogpu("google/gemma-2b-it")
+# Load a different model
+llmtogpu("google/gemma-3n-E4B-it", vllm_args={"tensor_parallel_size": 1, "gpu_memory_utilization": 0.80}) 
 
 # Now all calls use the new model
 response = llm("Explain quantum computing in simple terms")
-print(response)
+print(response[0])
 ```
+
+-----
 
 ## 🤖 DSPy Integration
 
-OVLLM is designed from the ground up to work seamlessly with DSPy:
+OVLLM is designed to be a perfect companion for DSPy. Just configure it once.
 
-### Simple DSPy Usage
+### Simple Prediction
 
 ```python
 import dspy
 import ovllm
 
-# Configure DSPy to use OVLLM
+# Configure DSPy to use your local OVLLM instance
 dspy.configure(lm=ovllm.llm)
 
-# Create a simple prediction
+# Create a simple predictor
 predict = dspy.Predict("question -> answer")
-result = predict(question="What is the meaning of life?")
+
+# Run the predictor
+result = predict(question="What is the powerhouse of the cell?")
 print(result.answer)
 ```
 
-### Advanced DSPy with Context
+### Chain of Thought (CoT) Reasoning
 
 ```python
 import dspy
 import ovllm
 
-# Load a larger model for more complex tasks
-ovllm.llmtogpu("Qwen/Qwen2.5-3B-Instruct")
 dspy.configure(lm=ovllm.llm)
 
-# Create a RAG-style predictor
-rag = dspy.Predict("question, context -> answer")
-result = rag(
-    question="How old is the king of England?",
-    context="King Charles III was born on November 14, 1948."
-)
-print(result.answer)
+# Use ChainOfThought to encourage step-by-step reasoning
+cot_predictor = dspy.ChainOfThought("question -> answer")
+
+result = cot_predictor(question="If I have 5 apples and I eat 2, then buy 3 more, how many apples do I have left?")
+print(f"Answer: {result.answer}")
+# The model's reasoning is also available!
+print(f"\nReasoning:\n{result.reasoning=}")
 ```
 
-### Batch Processing (Automatic Batching!)
+### Automatic Batching
 
-OVLLM automatically batches requests for maximum GPU efficiency:
+When you use DSPy features that make multiple calls to the LM (like `predict.batch` or optimizers), OVLLM's `AutoBatchLM` layer automatically catches these concurrent requests and sends them to the GPU in a single, efficient batch. You don't have to do anything extra to get this performance boost.
 
 ```python
-import dspy, ovllm
+import dspy
+import ovllm
 
-ovllm.llmtogpu("Qwen/Qwen2.5-1.5B-Instruct")
 dspy.configure(lm=ovllm.llm)
 
-# Create examples
-examples = [
-    dspy.Example(question="What is AI?", context="AI is artificial intelligence."),
-    dspy.Example(question="Capital of Japan?", context="The capital is Tokyo."),
-    dspy.Example(question="Who wrote Python?", context="Python was created by Guido van Rossum."),
+questions = [
+    "What color is the sky on a clear day?",
+    "What is 2+2?",
+    "What is the main component of air?",
 ]
 
-examples = [ex.with_inputs("question", "context") for ex in examples]
+examples = [dspy.Example(question=q).with_inputs("question") for q in questions]
 
-# This automatically batches all requests together!
-predict = dspy.Predict("question, context -> answer")
+predict = dspy.Predict("question -> answer")
+
+# This automatically runs as a single efficient batch on the GPU!
 results = predict.batch(examples)
 
-for result in results:
-    print(result.answer)
+for ex, res in zip(examples, results):
+    print(f"Q: {ex.question}")
+    print(f"A: {res.answer}\n")
 ```
 
-## 🛠️ Advanced Features
+-----
 
-### GPU Memory Management
-
-```python
-from ovllm import get_gpu_memory, suggest_models
-
-# Check available GPU memory
-print(f"GPU Memory: {get_gpu_memory():.1f} GB")
-
-# Get model recommendations
-suggest_models()
-# Output:
-# Available GPU memory: 16.0 GB
-# Suggested models for your system:
-#   - Qwen/Qwen2.5-3B-Instruct (3B params, ~6GB VRAM)
-#   - Qwen/Qwen2.5-7B-Instruct (7B params, ~14GB VRAM)
-#   - meta-llama/Llama-3.2-3B-Instruct (3B params, ~6GB VRAM)
-```
+## 🛠️ Advanced Usage
 
 ### Custom Parameters
 
+Pass any vLLM-supported parameters directly to `llmtogpu` to customize model loading and generation.
+
 ```python
-# Load model with custom parameters
+from ovllm import llmtogpu
+
 llmtogpu(
     "microsoft/phi-2",
-    temperature=0.0,      # Deterministic outputs
-    max_tokens=1024,      # Longer responses
-    dtype="float16"       # Specific precision
+    temperature=0.0,                  # For deterministic outputs
+    max_tokens=2048,                  # Allow longer responses
+    gpu_memory_utilization=0.9,       # Use 90% of GPU VRAM
+    dtype="float16"                   # Use specific precision
 )
 ```
 
 ### Error Handling
 
-OVLLM provides clear, actionable error messages:
+OVLLM provides clear, actionable error messages if something goes wrong.
 
-```python
-# If you try to load a model that's too large
-llmtogpu("meta-llama/Llama-2-70b-hf")
-# Error: Not enough GPU memory to load meta-llama/Llama-2-70b-hf.
-# Try a smaller model like:
-#   - Qwen/Qwen2.5-0.5B-Instruct (0.5B parameters)
-#   - Qwen/Qwen2.5-1.5B-Instruct (1.5B parameters)
-#   - google/gemma-2b-it (2B parameters)
+**Model too large for VRAM:**
+
+```
+❌ ERROR: Not enough GPU memory to load 'meta-llama/Llama-2-70b-hf'.
+   Try lowering the `gpu_memory_utilization` (e.g., `llmtogpu(..., gpu_memory_utilization=0.8)`) or use a smaller model.
 ```
 
-## 📚 Documentation
+**Gated Hugging Face Model:**
 
-Get comprehensive help directly in Python:
-
-```python
-import ovllm
-
-# Detailed help and examples
-help(ovllm)
-
-# Specific function help
-help(ovllm.llmtogpu)
-help(ovllm.llm)
+```
+❌ ERROR: The HuggingFace repository for 'meta-llama/Llama-3-8B-Instruct' is gated.
+   1. Visit https://huggingface.co/settings/tokens to create a token.
+   2. Run `huggingface-cli login` in your terminal and paste the token.
 ```
 
-## 🏗️ Architecture
+-----
 
-OVLLM consists of three main components:
+## ⚙️ How It Works
 
-1. **VLLMChatLM**: A thin wrapper around vLLM that speaks DSPy's protocol
-2. **AutoBatchLM**: An intelligent batching layer that accumulates requests
-3. **GlobalLLM**: A singleton manager that handles model lifecycle
+OVLLM's simplicity is enabled by a robust underlying architecture designed to solve common challenges with local LLMs.
 
-The library automatically:
-- Loads a small default model on first use
-- Batches concurrent requests for efficiency
-- Cleans up GPU memory when switching models
-- Provides helpful error messages and suggestions
+1.  **The Proxy Object (`llm`)**: When you use `ovllm.llm`, you're interacting with a lightweight proxy object. This object doesn't contain the massive model itself, so it can be safely copied by DSPy without duplicating the engine.
+2.  **The Singleton Manager**: The proxy communicates with a single, global instance manager. On the first call, this manager loads the vLLM engine into the GPU.
+3.  **The Auto-Batching Queue (`AutoBatchLM`)**: All requests from the proxy are sent to an intelligent queue. This queue collects concurrent requests and groups them into an optimal batch before sending them to the vLLM engine, maximizing GPU throughput.
+4.  **Automatic Cleanup**: When you call `llmtogpu()`, the manager gracefully shuts down the old engine and its batching queue, clears the GPU memory, and then loads the new model.
+
+This architecture gives you the best of both worlds: a dead-simple, stateless-feeling API and a high-performance, statefully-managed backend.
+
+-----
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome\! If you find a bug or have a feature request, please feel free to open an issue or submit a pull request.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🙏 Acknowledgments
-
-- Built on top of the amazing [vLLM](https://github.com/vllm-project/vllm) project
-- Designed for seamless integration with [DSPy](https://github.com/stanfordnlp/dspy)
-- Inspired by the simplicity of [Ollama](https://ollama.ai/)
+This project is licensed under the MIT License - see the `LICENSE` file for details.
