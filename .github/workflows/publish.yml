@@ -3,7 +3,6 @@ name: Publish to PyPI
 on:
   release:
     types: [published]
-  workflow_dispatch:
 
 jobs:
   build:
@@ -37,6 +36,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    permissions:
+      id-token: write
     environment:
       name: pypi
       url: https://pypi.org/p/ovllm
@@ -54,21 +55,3 @@ jobs:
         password: ${{ secrets.PYPI_API_TOKEN }}
         verbose: true
 
-  test-publish:
-    needs: build
-    runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch'
-    
-    steps:
-    - name: Download artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: dist
-        path: dist/
-    
-    - name: Publish to Test PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        repository-url: https://test.pypi.org/legacy/
-        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-        verbose: true
