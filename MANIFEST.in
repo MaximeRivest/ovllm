@@ -1,0 +1,11 @@
+include README.md
+include LICENSE
+include pyproject.toml
+recursive-include ovllm *.py
+recursive-include tests *.py
+prune tests/__pycache__
+prune ovllm/__pycache__
+global-exclude *.pyc
+global-exclude *.pyo
+global-exclude __pycache__
+global-exclude .DS_Store
